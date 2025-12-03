@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastapi import Header, HTTPException, status
 
-from app.config import settings
+from app.core.config import settings
 
 
 def verify_admin_api_key(x_admin_api_key: Optional[str] = Header(None)) -> None:
