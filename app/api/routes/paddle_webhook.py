@@ -18,6 +18,7 @@ from app.models.magic_token import MagicToken
 from app.models.webhook_log import WebhookLog
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/webhook")
@@ -115,7 +116,11 @@ async def paddle_webhook(
                 price_info = first_item.get("price", {}) or {}
 
                 # 우선 price.name 사용, 없으면 product_id 기반으로 매핑하는 구조로 확장 가능
-                raw_plan_name = price_info.get("name") or price_info.get("product_id") or "basic"
+                raw_plan_name = (
+                    price_info.get("name")
+                    or price_info.get("product_id")
+                    or "basic"
+                )
                 plan_name = str(raw_plan_name).lower()
 
             # 플랜에 따른 컨테이너 허용 수
@@ -198,8 +203,153 @@ async def paddle_webhook(
                 except Exception as e:
                     # 이메일 발송 실패해도 라이선스 생성은 성공으로 처리
                     # 로그만 남기고 계속 진행
-                    logger = logging.getLogger(__name__)
-                    logger.error(f"Failed to send magic link email: {e}")
+                    logger.error(f"Failed to send magic link email (subscription.*): {e}")
+
+    # ------------------------------------------------------------------
+    # transaction.completed 이벤트 처리
+    # (네가 psql에서 확인한 긴 payload 구조용)
+    # ------------------------------------------------------------------
+    elif event_type == "transaction.completed":
+        data = payload.get("data", {}) or {}
+
+        # 이 이벤트의 고유 ID는 transaction_id
+        transaction_id = data.get("id")
+
+        # 구독 기반 라이선스이므로 subscription_id 가 핵심 (라이선스 키로 사용)
+        subscription_id = data.get("subscription_id")
+        if not subscription_id:
+            # 구독 없는 단발성 결제라면 여기서는 스킵
+            logger.warning(
+                f"transaction.completed without subscription_id (txn={transaction_id}), ignoring for license creation."
+            )
+        else:
+            # -----------------------------
+            # 고객 ID / 이메일 추출
+            # -----------------------------
+            paddle_customer_id = data.get("customer_id")
+
+            email = None
+
+            # 일부 payload 에는 customer 오브젝트가 없고, billing_details 에만 있을 수도 있음
+            customer_obj = data.get("customer") or {}
+            if isinstance(customer_obj, dict):
+                email = customer_obj.get("email") or email
+
+            billing_details = data.get("billing_details") or {}
+            if isinstance(billing_details, dict):
+                email = billing_details.get("email") or email
+
+            # -----------------------------
+            # 플랜/상품 정보 및 컨테이너 수 계산
+            # -----------------------------
+            items = data.get("items") or []
+            plan_name = "basic"
+            allowed_containers = 1
+
+            if items:
+                first_item = items[0] or {}
+                price_info = first_item.get("price", {}) or {}
+
+                raw_plan_name = (
+                    price_info.get("name")
+                    or price_info.get("product_id")
+                    or "basic"
+                )
+                plan_name = str(raw_plan_name).lower()
+
+                # 수량 기반 기본값
+                qty = first_item.get("quantity")
+                if isinstance(qty, int) and qty > 0:
+                    allowed_containers = qty
+
+            # PLAN_MAX_CONTAINERS 매핑이 있으면 그 값을 우선 사용
+            mapped = PLAN_MAX_CONTAINERS.get(plan_name)
+            if mapped is not None:
+                allowed_containers = mapped
+
+            # -----------------------------
+            # Customer upsert (paddle_customer_id 기준)
+            # -----------------------------
+            customer = None
+
+            if paddle_customer_id:
+                customer = (
+                    db.query(Customer)
+                    .filter(Customer.paddle_customer_id == paddle_customer_id)
+                    .first()
+                )
+
+            # paddle_customer_id 로 못 찾았고 email 이 있으면 email 기준으로도 한번 더 탐색
+            if not customer and email:
+                customer = (
+                    db.query(Customer)
+                    .filter(Customer.email == email)
+                    .first()
+                )
+
+            if not customer and (paddle_customer_id or email):
+                customer = Customer(
+                    paddle_customer_id=paddle_customer_id,
+                    email=email,
+                )
+                db.add(customer)
+                db.flush()  # customer.id 확보
+
+            # -----------------------------
+            # License upsert (subscription_id 기준)
+            # -----------------------------
+            license_obj = (
+                db.query(License)
+                .filter(License.paddle_subscription_id == str(subscription_id))
+                .first()
+            )
+
+            is_new_license = False
+            status = data.get("status") or "active"
+
+            if not license_obj:
+                is_new_license = True
+                license_obj = License(
+                    paddle_subscription_id=str(subscription_id),
+                    email=email,
+                    allowed_containers=allowed_containers,
+                    customer_id=customer.id if customer else None,
+                    status=status,
+                )
+                db.add(license_obj)
+                db.flush()
+            else:
+                # 기존 라이선스 업데이트
+                license_obj.allowed_containers = allowed_containers
+                if email:
+                    license_obj.email = email
+                if customer:
+                    license_obj.customer_id = customer.id
+                license_obj.status = status
+                license_obj.updated_at = datetime.utcnow()
+
+            # 새 라이선스면 매직 링크 메일도 발송
+            if is_new_license and email:
+                try:
+                    token = generate_magic_token()
+                    expires_at = get_token_expiry()
+
+                    magic_token = MagicToken(
+                        token=token,
+                        license_id=license_obj.id,
+                        expires_at=expires_at,
+                    )
+                    db.add(magic_token)
+
+                    send_magic_link_email(
+                        email=email,
+                        token=token,
+                        license_key=str(subscription_id),
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to send magic link email (transaction.completed): {e}"
+                    )
 
     elif event_type == "subscription.cancelled":
         # 구독 취소 → 라이선스 상태를 cancelled로 변경
@@ -217,7 +367,7 @@ async def paddle_webhook(
                 license_obj.updated_at = datetime.utcnow()
 
     # 다른 event_type 은 일단 로그만 쌓고 패스
-    # ex) "transaction.completed", "subscription.past_due" 등
+    # ex) "subscription.past_due" 등
 
     # ------------------------------------------------------------------
     # 5) DB 반영

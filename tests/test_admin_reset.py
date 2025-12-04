@@ -239,3 +239,5 @@ def test_get_usage_after_reset(client: TestClient, db: Session, test_license: Li
     data = response.json()
     assert data["current_usage"] == 0
     assert len(data["usage_details"]) == 0
+
+

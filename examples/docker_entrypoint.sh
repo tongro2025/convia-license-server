@@ -48,3 +48,5 @@ echo "$VERIFY_RESPONSE" | jq '.' 2>/dev/null || echo "$VERIFY_RESPONSE"
 
 # 원래 엔트리포인트 실행
 exec "$@"
+
+

@@ -326,3 +326,5 @@ sudo cp /srv/license-server/.env /backup/location/.env.encrypted
 5. 서비스 재시작
 6. 헬스 체크 확인
 7. 로그 모니터링
+
+

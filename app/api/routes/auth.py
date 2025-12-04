@@ -192,3 +192,5 @@ async def get_my_license(
             for binding in machine_bindings
         ],
     }
+
+
