@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:15
+    container_name: convia-license-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: convia_license_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
