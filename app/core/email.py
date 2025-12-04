@@ -54,3 +54,4 @@ def send_magic_link_email(email: str, token: str, license_key: str) -> bool:
     
     return True
 
+

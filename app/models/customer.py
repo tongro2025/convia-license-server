@@ -22,3 +22,4 @@ class Customer(Base):
     # Relationships
     licenses = relationship("License", back_populates="customer", cascade="all, delete-orphan")
 
+

@@ -33,8 +33,12 @@ async def paddle_webhook(
     # Verify signature and get body
     body_bytes = await verify_paddle_signature(request)
 
-    # Get signature from header for logging
-    paddle_signature = request.headers.get("paddle-signature", "")
+    # Get signature from header for logging (support both cases)
+    paddle_signature = (
+        request.headers.get("Paddle-Signature")
+        or request.headers.get("paddle-signature")
+        or ""
+    )
 
     # Parse JSON payload
     try:
