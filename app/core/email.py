@@ -19,130 +19,178 @@ def send_magic_link_email(email: str, token: str, license_key: str) -> bool:
         license_key: License key (paddle_subscription_id)
 
     Returns:
-        True if email was sent successfully (or logged), False otherwise
+        True if email was sent successfully (or at least logged), False otherwise.
     """
-    magic_link_url = f"{settings.frontend_url}/license/portal?token={token}"
+    # Normalize base URL and build magic link
+    # settings.frontend_url is expected to be something like: https://license.convia.vip
+    base_url = settings.frontend_url.rstrip("/")
+    magic_link_url = f"{base_url}/license/magic?token={token}"
 
-    # SMTP 설정이 없으면 로그만 남기고 성공으로 처리 (개발 환경)
+    # If SMTP is not configured, just log and pretend success (dev / staging environments)
     if not settings.smtp_username or not settings.smtp_password:
         logger.info(
-            f"Magic link email would be sent to {email}:\n"
+            "Magic link email would be sent (SMTP not configured):\n"
+            f"  To: {email}\n"
             f"  License Key: {license_key}\n"
             f"  Magic Link: {magic_link_url}\n"
-            f"  Token: {token}\n"
-            f"  (SMTP not configured - email not actually sent)"
+            f"  Token: {token}"
         )
         return True
 
     try:
-        # 이메일 내용 생성
+        # Build email message
         msg = MIMEMultipart("alternative")
         msg["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
         msg["To"] = email
-        msg["Subject"] = "Convia 라이선스 활성화 링크"
+        msg["Subject"] = "Convia License – Your Magic Sign-In Link"
 
-        # HTML 이메일 본문
-        html_body = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <style>
-                body {{
-                    font-family: Arial, sans-serif;
-                    line-height: 1.6;
-                    color: #333;
-                }}
-                .container {{
-                    max-width: 600px;
-                    margin: 0 auto;
-                    padding: 20px;
-                }}
-                .header {{
-                    background-color: #4CAF50;
-                    color: white;
-                    padding: 20px;
-                    text-align: center;
-                    border-radius: 5px 5px 0 0;
-                }}
-                .content {{
-                    background-color: #f9f9f9;
-                    padding: 30px;
-                    border-radius: 0 0 5px 5px;
-                }}
-                .button {{
-                    display: inline-block;
-                    padding: 12px 30px;
-                    background-color: #4CAF50;
-                    color: white;
-                    text-decoration: none;
-                    border-radius: 5px;
-                    margin: 20px 0;
-                }}
-                .footer {{
-                    margin-top: 20px;
-                    font-size: 12px;
-                    color: #666;
-                    text-align: center;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>Convia 라이선스 활성화</h1>
-                </div>
-                <div class="content">
-                    <p>안녕하세요,</p>
-                    <p>Convia 라이선스가 성공적으로 생성되었습니다. 아래 링크를 클릭하여 라이선스를 활성화하세요.</p>
-                    
-                    <div style="text-align: center;">
-                        <a href="{magic_link_url}" class="button">라이선스 활성화하기</a>
-                    </div>
-                    
-                    <p>또는 아래 링크를 복사하여 브라우저에 붙여넣으세요:</p>
-                    <p style="word-break: break-all; background-color: #e8e8e8; padding: 10px; border-radius: 3px;">
-                        {magic_link_url}
-                    </p>
-                    
-                    <p><strong>라이선스 키:</strong> {license_key}</p>
-                    
-                    <p style="color: #d32f2f; font-size: 14px;">
-                        ⚠️ 이 링크는 24시간 후에 만료됩니다.
-                    </p>
-                </div>
-                <div class="footer">
-                    <p>이 이메일은 Convia License Server에서 자동으로 발송되었습니다.</p>
-                    <p>문의사항이 있으시면 고객 지원팀에 연락해주세요.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-
-        # 텍스트 버전 (HTML을 지원하지 않는 클라이언트용)
+        # Plain text body (for clients that do not support HTML)
         text_body = f"""
-        Convia 라이선스 활성화
+Convia License – Magic Sign-In Link
 
-        안녕하세요,
+Hi,
 
-        Convia 라이선스가 성공적으로 생성되었습니다. 아래 링크를 클릭하여 라이선스를 활성화하세요.
+Your Convia license has been created successfully.
 
-        라이선스 활성화 링크: {magic_link_url}
+Use the magic link below to open your license dashboard, view your license details,
+and manage container usage and machine bindings:
 
-        라이선스 키: {license_key}
+Magic link:
+{magic_link_url}
 
-        ⚠️ 이 링크는 24시간 후에 만료됩니다.
+License key:
+{license_key}
 
-        ---
-        이 이메일은 Convia License Server에서 자동으로 발송되었습니다.
+⚠ This link will expire in 24 hours. If the link has expired, you can request a new
+magic link from the Convia license portal using your license key.
+
+—
+This email was sent automatically by the Convia License Server.
+If you did not request this, you can safely ignore this email.
+"""
+
+        # HTML body (main user-facing content)
+        html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Convia License – Magic Sign-In Link</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f3f4f6;
+            margin: 0;
+            padding: 0;
+        }}
+        .container {{
+            max-width: 640px;
+            margin: 30px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+        }}
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff;
+            padding: 24px 32px;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 22px;
+        }}
+        .content {{
+            padding: 28px 32px 24px 32px;
+            background-color: #f9fafb;
+        }}
+        .button-wrapper {{
+            text-align: center;
+            margin: 24px 0 18px 0;
+        }}
+        .button {{
+            display: inline-block;
+            padding: 12px 32px;
+            background-color: #4f46e5;
+            color: #ffffff !important;
+            text-decoration: none;
+            border-radius: 999px;
+            font-weight: 600;
+            font-size: 14px;
+        }}
+        .button:hover {{
+            background-color: #4338ca;
+        }}
+        .code-block {{
+            word-break: break-all;
+            background-color: #e5e7eb;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 13px;
+        }}
+        .label {{
+            font-weight: 600;
+        }}
+        .warning {{
+            color: #b91c1c;
+            font-size: 13px;
+            margin-top: 16px;
+        }}
+        .footer {{
+            padding: 14px 24px 18px 24px;
+            font-size: 12px;
+            color: #6b7280;
+            text-align: center;
+            background-color: #f3f4f6;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Convia License – Magic Sign-In Link</h1>
+        </div>
+        <div class="content">
+            <p>Hi,</p>
+            <p>
+                Your Convia license has been created successfully.
+                Click the button below to open your license dashboard,
+                view your license details, and manage container usage and machine bindings.
+            </p>
+
+            <div class="button-wrapper">
+                <a href="{magic_link_url}" class="button">Open License Dashboard</a>
+            </div>
+
+            <p>If the button above does not work, copy and paste this link into your browser:</p>
+            <p class="code-block">{magic_link_url}</p>
+
+            <p class="label">License key:</p>
+            <p class="code-block">{license_key}</p>
+
+            <p class="warning">
+                ⚠ This magic link will expire in 24 hours. If it has expired,
+                please request a new link from the Convia license portal using your license key.
+            </p>
+        </div>
+        <div class="footer">
+            <p>This email was sent automatically by the Convia License Server.</p>
+            <p>If you did not request this, you can safely ignore this email.</p>
+        </div>
+    </div>
+</body>
+</html>
         """
 
-        # 이메일 본문 추가
+        # Attach both plain text and HTML parts
         msg.attach(MIMEText(text_body, "plain", "utf-8"))
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-        # SMTP 서버 연결 및 이메일 발송
+        # Send via SMTP
         server = smtplib.SMTP(settings.smtp_host, settings.smtp_port)
         if settings.smtp_use_tls:
             server.starttls()
@@ -155,6 +203,6 @@ def send_magic_link_email(email: str, token: str, license_key: str) -> bool:
 
     except Exception as e:
         logger.error(f"Failed to send magic link email to {email}: {e}", exc_info=True)
-        # 이메일 발송 실패해도 로그만 남기고 True 반환 (라이선스 생성은 성공)
-        # 실제 운영 환경에서는 실패 시 재시도 로직을 추가할 수 있음
+        # We still return True so that license creation/webhook handling
+        # is treated as successful; email retry logic can be added separately.
         return True

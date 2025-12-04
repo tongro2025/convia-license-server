@@ -329,3 +329,4 @@ sudo cp /srv/license-server/.env /backup/location/.env.encrypted
 
 
 
+
