@@ -21,3 +21,6 @@ class MachineBinding(Base):
     # Relationships
     license = relationship("License", back_populates="machine_bindings")
 
+
+
+

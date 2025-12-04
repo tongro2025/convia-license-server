@@ -18,3 +18,6 @@ class WebhookLog(Base):
     signature = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now(), nullable=False, index=True)
 
+
+
+

@@ -25,3 +25,6 @@ class MachineBindingOut(BaseModel):
 
         from_attributes = True
 
+
+
+

@@ -22,3 +22,6 @@ ENV PYTHONUNBUFFERED=1
 # Gunicorn으로 서버 실행
 CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]
 
+
+
+

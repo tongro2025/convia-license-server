@@ -24,3 +24,6 @@ class MagicToken(Base):
     # Relationships
     license = relationship("License", back_populates="magic_tokens")
 
+
+
+
