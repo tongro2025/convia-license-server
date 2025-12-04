@@ -328,3 +328,4 @@ sudo cp /srv/license-server/.env /backup/location/.env.encrypted
 7. 로그 모니터링
 
 
+

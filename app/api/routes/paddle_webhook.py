@@ -93,7 +93,7 @@ async def paddle_webhook(
     # 4) 이벤트 타입별 처리
     # ------------------------------------------------------------------
     # Paddle v2 subscription events (예: subscription.created, subscription.updated)
-    if event_type in {"subscription.created", "subscription.updated"}:
+    if event_type in {"subscription.created", "subscription.updated", "subscription.activated"}:
         subscription_data = payload.get("data", {}) or {}
         subscription_id = subscription_data.get("id")
 

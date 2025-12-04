@@ -50,3 +50,4 @@ echo "$VERIFY_RESPONSE" | jq '.' 2>/dev/null || echo "$VERIFY_RESPONSE"
 exec "$@"
 
 
+
