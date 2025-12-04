@@ -1,6 +1,8 @@
 """Admin management page routes."""
 
-from fastapi import APIRouter, Depends, Header, Request
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -16,22 +18,27 @@ router = APIRouter()
 @router.get("", response_class=HTMLResponse)
 async def admin_page(
     request: Request,
-    x_admin_api_key: str = Header(..., alias="X-Admin-API-Key"),
+    x_admin_api_key: Optional[str] = Header(None, alias="X-Admin-API-Key"),
+    admin_key: Optional[str] = Query(None, alias="admin_key"),
     db: Session = Depends(get_db),
 ):
-    """Admin management page for license and container management.
+    """Admin management page for license and container management."""
 
-    Args:
-        request: FastAPI request object
-        x_admin_api_key: Admin API key
-        db: Database session
+    # 1) Determine API key: header > query param
+    api_key = x_admin_api_key or admin_key
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "Admin API key is required. "
+                "Send 'X-Admin-API-Key' header or 'admin_key' query parameter."
+            ),
+        )
 
-    Returns:
-        HTML page for admin management
-    """
-    verify_admin_api_key(x_admin_api_key)
+    # 2) Validate key
+    verify_admin_api_key(api_key)
 
-    # Get all licenses with usage information
+    # 3) Load licenses and usage info
     licenses = db.query(License).all()
     licenses_data = []
     for license_obj in licenses:
@@ -66,13 +73,20 @@ async def admin_page(
             }
         )
 
-    # Get API base URL
-    base_url = str(request.base_url).rstrip("/")
-    api_url = f"{base_url}/api/admin/licenses"
+    # 3-1) Pre-render table rows HTML (복잡한 f-string 피하기)
+    rows_parts = []
+    for l in licenses_data:
+        if isinstance(l["allowed_containers"], int):
+            if l["current_usage"] < l["allowed_containers"]:
+                usage_class = "usage-ok"
+            elif l["current_usage"] == l["allowed_containers"]:
+                usage_class = "usage-warning"
+            else:
+                usage_class = "usage-full"
+        else:  # "무제한"
+            usage_class = "usage-ok"
 
-    # 🔥 여기서 행 HTML을 먼저 문자열로 만든 다음, 아래 큰 html에 끼워 넣는다
-    rows_html = "".join(
-        f"""
+        row_html = f"""
                         <tr data-license-id="{l['id']}">
                             <td>{l['id']}</td>
                             <td><code>{l['license_key']}</code></td>
@@ -80,20 +94,7 @@ async def admin_page(
                             <td><span class="status-badge status-{l['status']}">{l['status']}</span></td>
                             <td>{l['allowed_containers']}</td>
                             <td>
-                                <span class="usage-indicator {(
-                                    'usage-ok'
-                                    if (
-                                        (isinstance(l['allowed_containers'], int)
-                                         and l['current_usage'] < l['allowed_containers'])
-                                        or l['allowed_containers'] == '무제한'
-                                    )
-                                    else 'usage-warning'
-                                    if (
-                                        isinstance(l['allowed_containers'], int)
-                                        and l['current_usage'] == l['allowed_containers']
-                                    )
-                                    else 'usage-full'
-                                )}">
+                                <span class="usage-indicator {usage_class}">
                                     {l['current_usage']}
                                 </span>
                             </td>
@@ -109,9 +110,15 @@ async def admin_page(
                             </td>
                         </tr>
         """
-        for l in licenses_data
-    )
+        rows_parts.append(row_html)
 
+    rows_html = "\n".join(rows_parts)
+
+    # 4) API base URL (for reset endpoints)
+    base_url = str(request.base_url).rstrip("/")
+    api_url = f"{base_url}/api/admin/licenses"
+
+    # 5) Build HTML
     html_content = f"""
     <!DOCTYPE html>
     <html lang="ko">
@@ -360,7 +367,7 @@ async def admin_page(
 
         <script>
             const API_URL = '{api_url}';
-            const ADMIN_API_KEY = '{x_admin_api_key}';
+            const ADMIN_API_KEY = '{api_key}';
 
             function showMessage(text, type = 'success') {{
                 const messageEl = document.getElementById('message');
