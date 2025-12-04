@@ -88,3 +88,4 @@ async def verify_paddle_signature(request: Request) -> bytes:
 
     # Return body for further processing
     return body_bytes
+
