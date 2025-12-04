@@ -25,6 +25,13 @@ async def verify_license(
 ):
     """Verify license and bind to machine ID.
 
+    비즈니스 로직:
+    1. 라이선스 존재 및 활성 상태 확인
+    2. 머신 바인딩 확인 (이미 바인딩된 머신인지 체크)
+    3. 컨테이너 제한 확인 (허용된 컨테이너 수 체크)
+    4. 컨테이너 사용량 추적 (container_id가 제공된 경우)
+    5. 머신 바인딩 생성/업데이트
+
     Args:
         request: License verification request
         db: Database session
@@ -32,41 +39,90 @@ async def verify_license(
     Returns:
         License verification response
     """
-    # Find license by paddle_subscription_id (used as license_key)
+    # ------------------------------------------------------------------
+    # 1) 라이선스 조회 및 상태 확인
+    # ------------------------------------------------------------------
     license_obj = db.query(License).filter(
         License.paddle_subscription_id == request.license_key
     ).first()
 
-    if not license_obj or license_obj.status != "active":
+    if not license_obj:
         return LicenseVerifyResponse(
             valid=False,
-            message="Invalid or inactive license",
+            message="License not found",
         )
 
-    # Calculate current container usage
+    if license_obj.status != "active":
+        return LicenseVerifyResponse(
+            valid=False,
+            message=f"License is {license_obj.status}. Only active licenses are valid.",
+        )
+
+    # ------------------------------------------------------------------
+    # 2) 머신 바인딩 확인
+    # ------------------------------------------------------------------
+    # 머신이 이미 이 라이선스에 바인딩되어 있는지 확인
+    existing_binding = db.query(MachineBinding).filter(
+        MachineBinding.license_id == license_obj.id,
+        MachineBinding.machine_id == request.machine_id,
+    ).first()
+
+    # 머신이 다른 라이선스에 바인딩되어 있는지 확인 (선택적 - 필요시 활성화)
+    # other_binding = db.query(MachineBinding).filter(
+    #     MachineBinding.machine_id == request.machine_id,
+    #     MachineBinding.license_id != license_obj.id,
+    # ).first()
+
+    # ------------------------------------------------------------------
+    # 3) 컨테이너 사용량 계산 및 제한 확인
+    # ------------------------------------------------------------------
+    # 현재 컨테이너 사용량 계산 (고유한 container_id 기준)
     current_usage = db.query(LicenseUsage).filter(
         LicenseUsage.license_id == license_obj.id
     ).count()
 
-    # Check container limit (if allowed_containers is -1, it's unlimited)
     allowed_containers = license_obj.allowed_containers
-    if allowed_containers != -1 and current_usage >= allowed_containers:
-        return LicenseVerifyResponse(
-            valid=False,
-            message=f"Container limit reached. Allowed: {allowed_containers}, Current: {current_usage}",
-            allowed_containers=allowed_containers,
-            current_usage=current_usage,
-        )
 
-    # Track container usage if container_id is provided
+    # 컨테이너 제한 확인 (-1은 무제한)
+    if allowed_containers != -1:
+        # container_id가 제공된 경우, 새 컨테이너 추가 가능 여부 확인
+        if request.container_id:
+            # 이미 추적 중인 컨테이너인지 확인
+            existing_usage = db.query(LicenseUsage).filter(
+                LicenseUsage.license_id == license_obj.id,
+                LicenseUsage.container_id == request.container_id,
+            ).first()
+
+            # 새 컨테이너이고 제한에 도달한 경우
+            if not existing_usage and current_usage >= allowed_containers:
+                return LicenseVerifyResponse(
+                    valid=False,
+                    message=f"Container limit reached. Allowed: {allowed_containers}, Current: {current_usage}",
+                    allowed_containers=allowed_containers,
+                    current_usage=current_usage,
+                )
+        else:
+            # container_id가 없지만 제한에 도달한 경우
+            if current_usage >= allowed_containers:
+                return LicenseVerifyResponse(
+                    valid=False,
+                    message=f"Container limit reached. Allowed: {allowed_containers}, Current: {current_usage}",
+                    allowed_containers=allowed_containers,
+                    current_usage=current_usage,
+                )
+
+    # ------------------------------------------------------------------
+    # 4) 컨테이너 사용량 추적
+    # ------------------------------------------------------------------
     if request.container_id:
-        # Check if this container is already tracked
+        # 이미 추적 중인 컨테이너인지 확인
         existing_usage = db.query(LicenseUsage).filter(
             LicenseUsage.license_id == license_obj.id,
             LicenseUsage.container_id == request.container_id,
         ).first()
 
         if not existing_usage:
+            # 새 컨테이너 사용량 기록
             usage = LicenseUsage(
                 license_id=license_obj.id,
                 machine_id=request.machine_id,
@@ -75,28 +131,33 @@ async def verify_license(
             db.add(usage)
             current_usage += 1
 
-    # Check if machine is already bound to this license
-    existing_binding = db.query(MachineBinding).filter(
-        MachineBinding.license_id == license_obj.id,
-        MachineBinding.machine_id == request.machine_id,
-    ).first()
-
+    # ------------------------------------------------------------------
+    # 5) 머신 바인딩 생성/업데이트
+    # ------------------------------------------------------------------
     if not existing_binding:
-        # Create new machine binding
+        # 새 머신 바인딩 생성
         binding = MachineBinding(
             license_id=license_obj.id,
             machine_id=request.machine_id,
         )
         db.add(binding)
 
+    # ------------------------------------------------------------------
+    # 6) DB 커밋 및 응답 반환
+    # ------------------------------------------------------------------
     db.commit()
+
+    # 최종 사용량 다시 계산 (정확성 보장)
+    final_usage = db.query(LicenseUsage).filter(
+        LicenseUsage.license_id == license_obj.id
+    ).count()
 
     return LicenseVerifyResponse(
         valid=True,
         message="License verified and bound to machine",
         license_id=license_obj.id,
         allowed_containers=allowed_containers,
-        current_usage=current_usage,
+        current_usage=final_usage,
     )
 
 

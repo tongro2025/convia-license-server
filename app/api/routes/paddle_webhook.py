@@ -1,16 +1,20 @@
 # app/api/routes/paddle_webhook.py
 
+import json
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-import json
 
 from app.core.config import PLAN_MAX_CONTAINERS
+from app.core.email import send_magic_link_email
 from app.core.paddle_webhook_verify import verify_paddle_signature
+from app.core.utils import generate_magic_token, get_token_expiry
 from app.db.session import get_db
 from app.models.customer import Customer
 from app.models.license import License
+from app.models.magic_token import MagicToken
 from app.models.webhook_log import WebhookLog
 
 router = APIRouter()
@@ -147,7 +151,9 @@ async def paddle_webhook(
                 .first()
             )
 
+            is_new_license = False
             if not license_obj:
+                is_new_license = True
                 license_obj = License(
                     paddle_subscription_id=str(subscription_id),
                     email=customer_email,
@@ -156,6 +162,7 @@ async def paddle_webhook(
                     status=subscription_data.get("status", "active"),
                 )
                 db.add(license_obj)
+                db.flush()  # license_obj.id 확보
             else:
                 # 기존 라이선스 정보 업데이트
                 subscription_status = subscription_data.get("status", "active")
@@ -167,6 +174,32 @@ async def paddle_webhook(
                     license_obj.customer_id = customer.id
 
                 license_obj.updated_at = datetime.utcnow()
+
+            # 새 라이선스 생성 시 매직 링크 이메일 자동 발송
+            if is_new_license and customer_email:
+                try:
+                    # 매직 토큰 생성
+                    token = generate_magic_token()
+                    expires_at = get_token_expiry()
+
+                    magic_token = MagicToken(
+                        token=token,
+                        license_id=license_obj.id,
+                        expires_at=expires_at,
+                    )
+                    db.add(magic_token)
+
+                    # 이메일 발송
+                    send_magic_link_email(
+                        email=customer_email,
+                        token=token,
+                        license_key=str(subscription_id),
+                    )
+                except Exception as e:
+                    # 이메일 발송 실패해도 라이선스 생성은 성공으로 처리
+                    # 로그만 남기고 계속 진행
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to send magic link email: {e}")
 
     elif event_type == "subscription.cancelled":
         # 구독 취소 → 라이선스 상태를 cancelled로 변경

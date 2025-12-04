@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     # JWT
     license_jwt_secret: str
 
+    # Email (SMTP)
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "noreply@convia.vip"
+    smtp_from_name: str = "Convia License Server"
+    smtp_use_tls: bool = True
+
+    # Frontend URL for magic links
+    frontend_url: str = "https://convia.vip"
+
     # pydantic-settings v2 configuration
     model_config = SettingsConfigDict(
         env_file=".env",

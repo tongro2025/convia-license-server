@@ -7,7 +7,10 @@ import logging
 from app.core.config import settings
 from app.api.routes import (
     admin_license,
+    admin_page,
     admin_webhook,
+    auth,
+    license_pages,
     paddle_webhook,
     public_license,
 )
@@ -37,6 +40,13 @@ app.add_middleware(
 # Routers
 # ----------------------------------------------------
 
+# Auth routes
+app.include_router(
+    auth.router,
+    prefix="/api/auth",
+    tags=["auth"],
+)
+
 # Public license routes
 app.include_router(
     public_license.router,
@@ -63,6 +73,20 @@ app.include_router(
     admin_webhook.router,
     prefix="/api/admin/webhooks",
     tags=["admin"],
+)
+
+# Admin management page
+app.include_router(
+    admin_page.router,
+    prefix="/admin",
+    tags=["admin"],
+)
+
+# License frontend pages
+app.include_router(
+    license_pages.router,
+    prefix="/license",
+    tags=["license"],
 )
 
 # ----------------------------------------------------
