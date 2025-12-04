@@ -33,11 +33,15 @@ async def magic_link_page(
         HTML page for magic link verification
     """
     # Verify token
-    magic_token = db.query(MagicToken).filter(
-        MagicToken.token == token,
-        MagicToken.used_at.is_(None),
-        MagicToken.expires_at > datetime.utcnow(),
-    ).first()
+    magic_token = (
+        db.query(MagicToken)
+        .filter(
+            MagicToken.token == token,
+            MagicToken.used_at.is_(None),
+            MagicToken.expires_at > datetime.utcnow(),
+        )
+        .first()
+    )
 
     if not magic_token:
         # Invalid token page
@@ -87,16 +91,26 @@ async def magic_link_page(
         return HTMLResponse(content=html_content)
 
     # Get license information
-    license_obj = db.query(License).filter(License.id == magic_token.license_id).first()
+    license_obj = (
+        db.query(License).filter(License.id == magic_token.license_id).first()
+    )
     if not license_obj:
         raise HTTPException(status_code=404, detail="License not found")
 
     # Get usage stats
-    current_usage = db.query(LicenseUsage).filter(LicenseUsage.license_id == license_obj.id).count()
-    machine_bindings_count = db.query(MachineBinding).filter(MachineBinding.license_id == license_obj.id).count()
+    current_usage = (
+        db.query(LicenseUsage)
+        .filter(LicenseUsage.license_id == license_obj.id)
+        .count()
+    )
+    machine_bindings_count = (
+        db.query(MachineBinding)
+        .filter(MachineBinding.license_id == license_obj.id)
+        .count()
+    )
 
     base_url = str(request.base_url).rstrip("/")
-    api_url = f"{base_url}/api"
+    api_url = f"{base_url}/api"  # 현재는 사용 안 하지만 남겨둠
 
     html_content = f"""
     <!DOCTYPE html>
@@ -237,10 +251,14 @@ async def license_dashboard(
         HTML dashboard page
     """
     # Verify token
-    magic_token = db.query(MagicToken).filter(
-        MagicToken.token == token,
-        MagicToken.expires_at > datetime.utcnow(),
-    ).first()
+    magic_token = (
+        db.query(MagicToken)
+        .filter(
+            MagicToken.token == token,
+            MagicToken.expires_at > datetime.utcnow(),
+        )
+        .first()
+    )
 
     if not magic_token:
         raise HTTPException(
@@ -249,26 +267,86 @@ async def license_dashboard(
         )
 
     # Get license information
-    license_obj = db.query(License).filter(License.id == magic_token.license_id).first()
+    license_obj = (
+        db.query(License).filter(License.id == magic_token.license_id).first()
+    )
     if not license_obj:
         raise HTTPException(status_code=404, detail="License not found")
 
     # Get usage details
-    usage_list = db.query(LicenseUsage).filter(
-        LicenseUsage.license_id == license_obj.id
-    ).order_by(LicenseUsage.created_at.desc()).all()
+    usage_list = (
+        db.query(LicenseUsage)
+        .filter(LicenseUsage.license_id == license_obj.id)
+        .order_by(LicenseUsage.created_at.desc())
+        .all()
+    )
 
     # Get machine bindings
-    machine_bindings = db.query(MachineBinding).filter(
-        MachineBinding.license_id == license_obj.id
-    ).order_by(MachineBinding.created_at.desc()).all()
+    machine_bindings = (
+        db.query(MachineBinding)
+        .filter(MachineBinding.license_id == license_obj.id)
+        .order_by(MachineBinding.created_at.desc())
+        .all()
+    )
 
     current_usage = len(usage_list)
     allowed_containers = license_obj.allowed_containers
-    usage_percentage = (current_usage / allowed_containers * 100) if allowed_containers != -1 and allowed_containers > 0 else 0
+
+    if allowed_containers != -1 and allowed_containers > 0:
+        usage_percentage = current_usage / allowed_containers * 100
+        display_allowed = allowed_containers
+        progress_width = min(usage_percentage, 100)
+        progress_bar_html = f"""
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {progress_width}%;">
+                        {current_usage} / {allowed_containers}
+                    </div>
+                </div>
+        """
+    else:
+        usage_percentage = 0
+        display_allowed = "∞"
+        progress_bar_html = ""
+
+    # 컨테이너 사용 현황 테이블용 HTML
+    if usage_list:
+        usage_rows_html = "".join(
+            f"""
+                            <tr>
+                                <td>{usage.id}</td>
+                                <td><code>{usage.machine_id}</code></td>
+                                <td><code>{usage.container_id or 'N/A'}</code></td>
+                                <td>{usage.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
+                            </tr>
+            """
+            for usage in usage_list
+        )
+    else:
+        usage_rows_html = (
+            "<tr><td colspan='4' style='text-align: center; padding: 40px; "
+            "color: #999;'>사용 중인 컨테이너가 없습니다.</td></tr>"
+        )
+
+    # 머신 바인딩 테이블용 HTML
+    if machine_bindings:
+        bindings_rows_html = "".join(
+            f"""
+                            <tr>
+                                <td>{binding.id}</td>
+                                <td><code>{binding.machine_id}</code></td>
+                                <td>{binding.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
+                            </tr>
+            """
+            for binding in machine_bindings
+        )
+    else:
+        bindings_rows_html = (
+            "<tr><td colspan='3' style='text-align: center; padding: 40px; "
+            "color: #999;'>바인딩된 머신이 없습니다.</td></tr>"
+        )
 
     base_url = str(request.base_url).rstrip("/")
-    api_url = f"{base_url}/api"
+    api_url = f"{base_url}/api"  # 현재는 JS 호출은 안 하지만 남겨둠
 
     html_content = f"""
     <!DOCTYPE html>
@@ -397,7 +475,7 @@ async def license_dashboard(
                     </div>
                     <div class="stat-card">
                         <h3>허용 컨테이너</h3>
-                        <div class="value">{allowed_containers if allowed_containers != -1 else '∞'}</div>
+                        <div class="value">{display_allowed}</div>
                     </div>
                     <div class="stat-card">
                         <h3>현재 사용</h3>
@@ -409,7 +487,7 @@ async def license_dashboard(
                     </div>
                 </div>
 
-                {"<div class='progress-bar'><div class='progress-fill' style='width: " + str(min(usage_percentage, 100)) + "%;'>" + str(current_usage) + " / " + str(allowed_containers) + "</div></div>" if allowed_containers != -1 else ""}
+                {progress_bar_html}
 
                 <div class="section">
                     <h2>컨테이너 사용 현황</h2>
@@ -424,14 +502,7 @@ async def license_dashboard(
                             </tr>
                         </thead>
                         <tbody>
-                            {"".join([f"""
-                            <tr>
-                                <td>{usage.id}</td>
-                                <td><code>{usage.machine_id}</code></td>
-                                <td><code>{usage.container_id or 'N/A'}</code></td>
-                                <td>{usage.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
-                            </tr>
-                            """ for usage in usage_list]) if usage_list else "<tr><td colspan='4' style='text-align: center; padding: 40px; color: #999;'>사용 중인 컨테이너가 없습니다.</td></tr>"}
+                            {usage_rows_html}
                         </tbody>
                     </table>
                 </div>
@@ -447,13 +518,7 @@ async def license_dashboard(
                             </tr>
                         </thead>
                         <tbody>
-                            {"".join([f"""
-                            <tr>
-                                <td>{binding.id}</td>
-                                <td><code>{binding.machine_id}</code></td>
-                                <td>{binding.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
-                            </tr>
-                            """ for binding in machine_bindings]) if machine_bindings else "<tr><td colspan='3' style='text-align: center; padding: 40px; color: #999;'>바인딩된 머신이 없습니다.</td></tr>"}
+                            {bindings_rows_html}
                         </tbody>
                     </table>
                 </div>
