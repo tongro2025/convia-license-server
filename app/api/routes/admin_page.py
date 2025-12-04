@@ -35,26 +35,82 @@ async def admin_page(
     licenses = db.query(License).all()
     licenses_data = []
     for license_obj in licenses:
-        current_usage = db.query(LicenseUsage).filter(
-            LicenseUsage.license_id == license_obj.id
-        ).count()
-        machine_bindings_count = db.query(MachineBinding).filter(
-            MachineBinding.license_id == license_obj.id
-        ).count()
-        licenses_data.append({
-            "id": license_obj.id,
-            "license_key": license_obj.paddle_subscription_id,
-            "email": license_obj.email or "N/A",
-            "status": license_obj.status,
-            "allowed_containers": license_obj.allowed_containers if license_obj.allowed_containers != -1 else "무제한",
-            "current_usage": current_usage,
-            "machine_bindings_count": machine_bindings_count,
-            "created_at": license_obj.created_at.strftime("%Y-%m-%d %H:%M:%S") if license_obj.created_at else "N/A",
-        })
+        current_usage = (
+            db.query(LicenseUsage)
+            .filter(LicenseUsage.license_id == license_obj.id)
+            .count()
+        )
+        machine_bindings_count = (
+            db.query(MachineBinding)
+            .filter(MachineBinding.license_id == license_obj.id)
+            .count()
+        )
+        licenses_data.append(
+            {
+                "id": license_obj.id,
+                "license_key": license_obj.paddle_subscription_id,
+                "email": license_obj.email or "N/A",
+                "status": license_obj.status,
+                "allowed_containers": (
+                    license_obj.allowed_containers
+                    if license_obj.allowed_containers != -1
+                    else "무제한"
+                ),
+                "current_usage": current_usage,
+                "machine_bindings_count": machine_bindings_count,
+                "created_at": license_obj.created_at.strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                if license_obj.created_at
+                else "N/A",
+            }
+        )
 
     # Get API base URL
     base_url = str(request.base_url).rstrip("/")
     api_url = f"{base_url}/api/admin/licenses"
+
+    # 🔥 여기서 행 HTML을 먼저 문자열로 만든 다음, 아래 큰 html에 끼워 넣는다
+    rows_html = "".join(
+        f"""
+                        <tr data-license-id="{l['id']}">
+                            <td>{l['id']}</td>
+                            <td><code>{l['license_key']}</code></td>
+                            <td>{l['email']}</td>
+                            <td><span class="status-badge status-{l['status']}">{l['status']}</span></td>
+                            <td>{l['allowed_containers']}</td>
+                            <td>
+                                <span class="usage-indicator {(
+                                    'usage-ok'
+                                    if (
+                                        (isinstance(l['allowed_containers'], int)
+                                         and l['current_usage'] < l['allowed_containers'])
+                                        or l['allowed_containers'] == '무제한'
+                                    )
+                                    else 'usage-warning'
+                                    if (
+                                        isinstance(l['allowed_containers'], int)
+                                        and l['current_usage'] == l['allowed_containers']
+                                    )
+                                    else 'usage-full'
+                                )}">
+                                    {l['current_usage']}
+                                </span>
+                            </td>
+                            <td>{l['machine_bindings_count']}</td>
+                            <td>{l['created_at']}</td>
+                            <td class="actions">
+                                <button class="btn btn-reset-containers" onclick="resetContainers({l['id']})">
+                                    컨테이너 리셋
+                                </button>
+                                <button class="btn btn-reset" onclick="resetMachines({l['id']})">
+                                    머신 리셋
+                                </button>
+                            </td>
+                        </tr>
+        """
+        for l in licenses_data
+    )
 
     html_content = f"""
     <!DOCTYPE html>
@@ -296,30 +352,7 @@ async def admin_page(
                         </tr>
                     </thead>
                     <tbody id="license-tbody">
-                        {"".join([f"""
-                        <tr data-license-id="{l['id']}">
-                            <td>{l['id']}</td>
-                            <td><code>{l['license_key']}</code></td>
-                            <td>{l['email']}</td>
-                            <td><span class="status-badge status-{l['status']}">{l['status']}</span></td>
-                            <td>{l['allowed_containers']}</td>
-                            <td>
-                                <span class="usage-indicator {'usage-ok' if (isinstance(l['allowed_containers'], int) and l['current_usage'] < l['allowed_containers']) or l['allowed_containers'] == '무제한' else 'usage-warning' if (isinstance(l['allowed_containers'], int) and l['current_usage'] == l['allowed_containers']) else 'usage-full'}">
-                                    {l['current_usage']}
-                                </span>
-                            </td>
-                            <td>{l['machine_bindings_count']}</td>
-                            <td>{l['created_at']}</td>
-                            <td class="actions">
-                                <button class="btn btn-reset-containers" onclick="resetContainers({l['id']})">
-                                    컨테이너 리셋
-                                </button>
-                                <button class="btn btn-reset" onclick="resetMachines({l['id']})">
-                                    머신 리셋
-                                </button>
-                            </td>
-                        </tr>
-                        """ for l in licenses_data])}
+                        {rows_html}
                     </tbody>
                 </table>
             </div>
