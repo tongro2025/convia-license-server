@@ -21,3 +21,4 @@ class LicenseUsage(Base):
 
     # Relationships
     license = relationship("License", back_populates="license_usages")
+

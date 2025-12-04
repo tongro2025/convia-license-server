@@ -3,11 +3,11 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.config import PLAN_MAX_CONTAINERS
-from app.core.security import verify_paddle_signature
+from app.core.paddle_webhook_verify import verify_paddle_signature
 from app.db.session import get_db
 from app.models.customer import Customer
 from app.models.license import License
@@ -19,28 +19,22 @@ router = APIRouter()
 @router.post("/webhook")
 async def paddle_webhook(
     request: Request,
-    paddle_signature: str = Header(..., alias="Paddle-Signature"),
     db: Session = Depends(get_db),
 ):
     """Handle Paddle webhook events.
 
     Args:
         request: FastAPI request object
-        paddle_signature: Paddle webhook signature header
         db: Database session
 
     Returns:
         Success response
     """
-    # Read raw body for signature verification
-    body_bytes = await request.body()
+    # Verify signature and get body
+    body_bytes = await verify_paddle_signature(request)
 
-    # Verify signature
-    if not verify_paddle_signature(body_bytes, paddle_signature):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid webhook signature",
-        )
+    # Get signature from header for logging
+    paddle_signature = request.headers.get("paddle-signature", "")
 
     # Parse JSON payload
     try:
